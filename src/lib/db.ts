@@ -13,14 +13,20 @@ function createPrisma(): PrismaClient {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Pool } = require("pg");
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { PrismaPg } = require("@prisma/adapter-pg");
   // Validate the server certificate when SSL is in use (fixes MITM risk).
   // Skip SSL entirely for plain local Postgres URLs that omit sslmode.
   const usesSsl = url.includes("sslmode=") || url.includes(".azure.com") || url.includes("railway.app");
-  const pool = new Pool({ connectionString: url, ssl: usesSsl ? { rejectUnauthorized: true } : undefined });
-  const adapter = new PrismaPg(pool);
+  // Prisma 7: pass the connection config to the adapter (it owns the pool).
+  // A pre-built pg.Pool instance was not wiring the connection through, so the
+  // engine fell back to 127.0.0.1.
+  const adapter = new PrismaPg({
+    connectionString: url,
+    ssl: usesSsl ? { rejectUnauthorized: true } : undefined,
+  });
+  try {
+    console.log(`[db] Prisma client init via pg adapter, host=${new URL(url).host}, ssl=${usesSsl}`);
+  } catch {}
   return new PrismaClient({ adapter } as any);
 }
 
