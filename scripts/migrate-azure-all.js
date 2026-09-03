@@ -1,5 +1,5 @@
 /**
- * Consolidated Neon PostgreSQL migration — replaces all individual migrate-*.js scripts.
+ * Consolidated Azure PostgreSQL migration script.
  * Every statement is idempotent (CREATE TABLE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS).
  * Safe to run on every deploy.
  */
@@ -17,35 +17,30 @@ async function run(pool, sql, label) {
 }
 
 /**
- * Preview and branch deploys on Vercel inherit the same DATABASE_URL as production, so
- * without this gate every pull-request build mutates the production schema before anyone
- * has reviewed it. Statements here are additive and idempotent, so the blast radius is
- * small — but "small" is not "none", and a preview build should never touch prod.
- *
- * Runs when: VERCEL_ENV is production, or the build is not on Vercel (local/CI), or
- * RUN_MIGRATIONS=1 is set explicitly. Skips preview builds.
+ * Migrations run by default in all environments (local, CI, Azure).
+ * Set SKIP_MIGRATIONS=1 to suppress, or RUN_MIGRATIONS=1 to force even when
+ * DATABASE_URL is absent (useful for debugging).
  */
 function migrationsEnabled() {
   if (process.env.RUN_MIGRATIONS === "1") return true;
   if (process.env.SKIP_MIGRATIONS === "1") return false;
-  const vercelEnv = process.env.VERCEL_ENV;
-  if (!vercelEnv) return true; // local or non-Vercel CI
-  return vercelEnv === "production";
+  return true;
 }
 
 async function main() {
   if (!migrationsEnabled()) {
-    console.log(`Skipping neon migration — VERCEL_ENV=${process.env.VERCEL_ENV} (set RUN_MIGRATIONS=1 to force)`);
+    console.log("Skipping migration — SKIP_MIGRATIONS=1");
     return;
   }
 
   const url = process.env.DATABASE_URL;
   if (!url || url.startsWith("file:")) {
-    console.log("Skipping neon migration — not a postgres URL");
+    console.log("Skipping migration — not a postgres URL");
     return;
   }
 
-  const pool = new Pool({ connectionString: url, ssl: { rejectUnauthorized: false } });
+  const usesSsl = url.includes("sslmode=") || url.includes(".azure.com") || url.includes("railway.app");
+  const pool = new Pool({ connectionString: url, ssl: usesSsl ? { rejectUnauthorized: true } : undefined });
 
   try {
     // ── 1. Extend core tables (columns added incrementally) ─────────────────────

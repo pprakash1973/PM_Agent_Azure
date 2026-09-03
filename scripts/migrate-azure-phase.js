@@ -1,15 +1,16 @@
-// Adds currentPhase column to Neon PostgreSQL (production)
-// Run with: node scripts/migrate-neon-phase.js
+// Adds currentPhase column to Azure PostgreSQL (production)
+// Run with: node scripts/migrate-azure-phase.js
 require("dotenv/config");
 const { Pool } = require("pg");
 
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url || url.startsWith("file:")) {
-    console.log("Skipping neon-phase migration — not a postgres URL");
+    console.log("Skipping azure-phase migration — not a postgres URL");
     return;
   }
-  const pool = new Pool({ connectionString: url, ssl: { rejectUnauthorized: false } });
+  const usesSsl = url.includes("sslmode=") || url.includes(".azure.com") || url.includes("railway.app");
+  const pool = new Pool({ connectionString: url, ssl: usesSsl ? { rejectUnauthorized: true } : undefined });
   try {
     await pool.query(
       `ALTER TABLE "Project" ADD COLUMN IF NOT EXISTS "currentPhase" TEXT NOT NULL DEFAULT 'initiation'`

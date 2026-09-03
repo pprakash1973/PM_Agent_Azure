@@ -1,10 +1,10 @@
 /**
- * neon-reset.mjs
- * Wipe all data from the Neon (PostgreSQL) database.
- * Reads DATABASE_URL from .env.neon (or .env.local if --local flag passed).
+ * db-reset.mjs
+ * Wipe all data from the Azure PostgreSQL database.
+ * Reads DATABASE_URL from .env (or .env.local if --local flag passed).
  * Usage:
- *   node scripts/neon-reset.mjs           # truncate all tables
- *   node scripts/neon-reset.mjs --reseed  # truncate then re-run seed
+ *   node scripts/db-reset.mjs           # truncate all tables
+ *   node scripts/db-reset.mjs --reseed  # truncate then re-run seed
  */
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
@@ -27,7 +27,7 @@ function readEnv(file) {
 
 const useLocal = process.argv.includes("--local");
 const reseed   = process.argv.includes("--reseed");
-const envFile  = useLocal ? ".env.local" : ".env.neon";
+const envFile  = useLocal ? ".env.local" : ".env";
 
 console.log(`\nReading ${envFile}...`);
 const env = readEnv(envFile);
@@ -40,7 +40,8 @@ if (!url || !url.startsWith("postgresql")) {
 const host = url.replace(/^[^@]+@/, "").split("/")[0];
 console.log(`Connecting to: ${host}\n`);
 
-const pool = new Pool({ connectionString: url, ssl: { rejectUnauthorized: false } });
+const usesSsl = url.includes("sslmode=") || url.includes(".azure.com") || url.includes("railway.app");
+const pool = new Pool({ connectionString: url, ssl: usesSsl ? { rejectUnauthorized: true } : undefined });
 
 async function main() {
   const client = await pool.connect();

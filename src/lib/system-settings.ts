@@ -21,7 +21,7 @@ function pgPool() {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { Pool } = require("pg");
     const url = dbUrl();
-    const usesSsl = url.includes("sslmode=") || url.includes("neon.tech") || url.includes(".azure.com") || url.includes("railway.app");
+    const usesSsl = url.includes("sslmode=") || url.includes(".azure.com") || url.includes("railway.app");
     _pool = new Pool({ connectionString: url, ssl: usesSsl ? { rejectUnauthorized: true } : undefined });
   }
   return _pool;

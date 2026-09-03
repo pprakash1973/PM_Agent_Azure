@@ -12,7 +12,7 @@ Enterprise project management office (PMO) platform where AI performs the majori
 | Auth | NextAuth v5 (credentials + Google OAuth) |
 | AI | Anthropic Claude API (claude-sonnet-4-6) |
 | UI | Tailwind CSS v4 + Radix UI primitives |
-| Deployment | Vercel (frontend + API) + Railway/Neon (PostgreSQL) |
+| Deployment | Azure App Service + Azure Database for PostgreSQL |
 | Email | Resend |
 
 ## Features
@@ -36,7 +36,7 @@ Enterprise project management office (PMO) platform where AI performs the majori
 
 ### Prerequisites
 - Node.js 20+
-- PostgreSQL database (Railway, Neon, or local)
+- PostgreSQL database (Azure Database for PostgreSQL, Railway, or local)
 
 ### Setup
 
@@ -94,31 +94,35 @@ npm run dev
 
 ---
 
-## Deploy to Vercel + Railway/Neon
+## Deploy to Azure App Service
 
-### 1. Database — Railway or Neon PostgreSQL
+### 1. Database — Azure Database for PostgreSQL
 
-**Railway:**
-1. Create a [Railway](https://railway.app) project → Add PostgreSQL service
-2. Copy the `DATABASE_URL` connection string
+1. In the Azure Portal, create an **Azure Database for PostgreSQL – Flexible Server**
+2. Create a database (e.g. `pmAgent`)
+3. Copy the connection string as `DATABASE_URL`:
+   ```
+   postgresql://user@server:password@server.postgres.database.azure.com:5432/pmAgent?sslmode=require
+   ```
 
-**Neon (recommended for Vercel):**
-1. Create a [Neon](https://neon.tech) project
-2. Copy the pooled connection string as `DATABASE_URL`
+### 2. Azure App Service — App Deployment
 
-### 2. Vercel — App Deployment
-
-1. Fork or import this repo at [vercel.com/new](https://vercel.com/new)
-2. Add the following **Environment Variables** in the Vercel dashboard:
+1. Create an **Azure App Service** (Node 20 LTS, Linux)
+2. In **Configuration → Application settings**, add:
 
 | Variable | Value |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection string from Railway/Neon |
+| `DATABASE_URL` | Azure PostgreSQL connection string |
 | `NEXTAUTH_SECRET` | Random 32-char string (`openssl rand -base64 32`) |
-| `NEXTAUTH_URL` | Your Vercel domain, e.g. `https://pm-agent.vercel.app` |
+| `NEXTAUTH_URL` | Your App Service URL, e.g. `https://pm-agent.azurewebsites.net` |
 | `ANTHROPIC_API_KEY` | Your Anthropic API key (`sk-ant-...`) |
+| `WEBSITE_RUN_FROM_PACKAGE` | `1` |
 
-3. **Deploy** — Vercel auto-runs `prisma generate`, migration scripts, and `next build` (configured in `vercel.json`)
+3. **CI/CD** — The included GitHub Actions workflow (`.github/workflows/azure-deploy.yml`) builds and deploys on every push to `main`. Add these **GitHub secrets**:
+   - `DATABASE_URL`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `ANTHROPIC_API_KEY`
+   - `RESEND_API_KEY`, `EMAIL_FROM`, `OPENAI_API_KEY`
+   - `AZURE_WEBAPP_PUBLISH_PROFILE` (download from Azure portal → App Service → Get publish profile)
+   - `AZURE_WEBAPP_NAME` (as a GitHub **variable**, not secret)
 
 ### 3. Seed Database (first deploy only)
 
@@ -141,9 +145,10 @@ prisma/
 └── prisma.config.ts           # Prisma 7 datasource config
 
 scripts/
-├── migrate-admin-module.js    # Adds Admin/Cluster/BU tables (idempotent)
-├── migrate-pgm-phase.js       # Adds PGM role fields (idempotent)
-└── migrate-pgm-phase2.js      # Adds escalation tables (idempotent)
+├── migrate-azure-all.js       # Consolidated Azure PostgreSQL migration (idempotent, runs on every deploy)
+├── migrate-azure-phase.js     # Adds currentPhase column (idempotent)
+├── migrate-azure-admin-enh.js # Admin module enhancements (User.uid, delivery-owner cache)
+└── db-reset.mjs               # Wipe all data from Azure PostgreSQL (dev/UAT use only)
 
 src/
 ├── app/

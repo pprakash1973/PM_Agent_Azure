@@ -1,18 +1,19 @@
-// Admin Module Enhancements migration — Neon PostgreSQL
+// Admin Module Enhancements migration — Azure PostgreSQL
 //   1. User.uid (nullable, unique) — AD/org key
 //   2. Project delivery-owner cache columns
 //   3. Backfill a UID for the surviving platform admin
-// Idempotent. Run with: node scripts/migrate-neon-admin-enh.js
+// Idempotent. Run with: node scripts/migrate-azure-admin-enh.js
 require("dotenv/config");
 const { Pool } = require("pg");
 
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url || url.startsWith("file:")) {
-    console.log("Skipping — DATABASE_URL is not a postgres URL. Set it to the Neon URL and re-run.");
+    console.log("Skipping — DATABASE_URL is not a postgres URL. Set it to the Azure Postgres URL and re-run.");
     return;
   }
-  const pool = new Pool({ connectionString: url, ssl: { rejectUnauthorized: false } });
+  const usesSsl = url.includes("sslmode=") || url.includes(".azure.com") || url.includes("railway.app");
+  const pool = new Pool({ connectionString: url, ssl: usesSsl ? { rejectUnauthorized: true } : undefined });
   try {
     // 1. User.uid
     await pool.query(`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "uid" TEXT`);
