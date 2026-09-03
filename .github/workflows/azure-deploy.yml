@@ -7,6 +7,8 @@ on:
 
 env:
   NODE_VERSION: "22.x"
+  AZURE_WEBAPP_NAME: pm-agent-ust
+  AZURE_RESOURCE_GROUP: pm-agent-dev
 
 jobs:
   build-and-deploy:
@@ -59,13 +61,20 @@ jobs:
             scripts \
             -x "*.git*" "*.env*"
 
-      # ── Deploy to Azure App Service ──────────────────────────────────────────
-      - name: Deploy to Azure
-        uses: azure/webapps-deploy@v3
+      # ── Login to Azure via service principal ─────────────────────────────────
+      - name: Azure Login
+        uses: azure/login@v2
         with:
-          app-name:        pm-agent-ust
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package:         deploy.zip
-          type:            zip
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Migrations + seeding run via App Service startup command (VNet access)
+      # ── Deploy to Azure App Service via CLI (works with basic auth disabled) ─
+      - name: Deploy to Azure
+        run: |
+          az webapp deploy \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --name ${{ env.AZURE_WEBAPP_NAME }} \
+            --src-path deploy.zip \
+            --type zip \
+            --async false
+
+      # Migrations run via App Service startup command (has VNet access to DB)
