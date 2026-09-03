@@ -58,6 +58,8 @@ jobs:
             package-lock.json \
             node_modules \
             prisma \
+            prisma.config.ts \
+            next.config.ts \
             scripts \
             -x "*.git*" "*.env*"
 
