@@ -169,7 +169,7 @@ export async function POST(req: NextRequest) {
         ocrApplied = true;
         extractionConfidence = 0.92;
       } catch (diErr: any) {
-        console.warn("[parse-requirements] Azure DI failed, falling back to local extraction:", diErr?.message);
+        console.error("[parse-requirements] Azure DI failed, falling back to local extraction:", diErr?.message, diErr?.code ?? "");
         engine = "text-fallback";
         extractionConfidence = 0.85;
         text = "";

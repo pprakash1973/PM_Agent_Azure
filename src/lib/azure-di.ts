@@ -21,11 +21,20 @@ function getClient() {
   return new DocumentAnalysisClient(stripBom(rawEndpoint), new AzureKeyCredential(stripBom(rawKey)));
 }
 
-export async function analyzeDocument(sasUrl: string): Promise<string> {
+export async function analyzeDocument(sasUrl: string, timeoutMs = 180_000): Promise<string> {
   const client = getClient();
   const poller = await client.beginAnalyzeDocumentFromUrl("prebuilt-layout", sasUrl);
-  const result = await poller.pollUntilDone();
-  return JSON.stringify(result);
+  // Azure App Service drops connections at ~230s; use 180s to fail fast and surface a clear error.
+  const abort = AbortSignal.timeout(timeoutMs);
+  const result = await poller.pollUntilDone({ abortSignal: abort });
+  // Serialize only the plain data we use in diResultToChunks (avoids prototype/Symbol bleed).
+  const plain = {
+    content: (result as any).content,
+    paragraphs: (result as any).paragraphs ?? [],
+    tables: (result as any).tables ?? [],
+    pages: (result as any).pages ?? [],
+  };
+  return JSON.stringify(plain);
 }
 
 // Roles to exclude from chunks (noise)
