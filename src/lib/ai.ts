@@ -115,7 +115,7 @@ const ARTIFACT_TOKEN_BUDGET: Record<string, number> = {
   raid_register:              5000,  // 4 arrays; capped to keep generation under 60s
   risk_register:              4000,  // detailed risk entries; capped to keep generation under 60s
   raci_matrix:                8000,  // activities × roles matrix
-  resource_plan:              8000,  // team directory + skills matrix
+  resource_plan:             16000,  // team directory + skills matrix; large WBS = 30+ roles
   cost_plan:                  8000,  // labor estimates + phase breakdown
   lessons_learned:            8000,  // detailed lesson entries
   closure_report:             8000,  // objectives scorecard + deliverables + benefits
