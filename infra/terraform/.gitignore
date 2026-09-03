@@ -1,0 +1,33 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Terraform state contains EVERY secret in plaintext — DB password, API keys,
+# storage connection string. It must never reach source control.
+# ═══════════════════════════════════════════════════════════════════════════
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+crash.log
+crash.*.log
+
+# NOTE: .terraform.lock.hcl is deliberately NOT ignored. Commit it — it pins
+# provider versions so every engineer and the CI runner resolve identically.
+# It is generated on first `terraform init`.
+
+# Variable files holding real values
+terraform.tfvars
+*.auto.tfvars
+secrets.auto.tfvars
+!terraform.tfvars.example
+
+# Plan files embed variable values, including secrets
+*.tfplan
+*.tfplan.*
+
+# Service principal credentials
+azure-credentials.json
+sp-output.json
+
+# Editor
+.vscode/
+.idea/
+*.swp

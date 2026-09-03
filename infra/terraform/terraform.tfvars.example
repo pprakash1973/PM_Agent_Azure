@@ -1,0 +1,99 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# DO NOT put secrets in this file. Export them as environment variables
+# instead — see the "Secrets" section at the bottom.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── REQUIRED: your corporate subscription ──────────────────────────────────
+# Find it with:  az account show --query id -o tsv
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# ── Placement ───────────────────────────────────────────────────────────────
+# Confirm Document Intelligence is available in your region:
+#   az cognitiveservices account list-skus --kind FormRecognizer -o table
+location            = "australiaeast"
+resource_group_name = "pm-agent-dev"
+
+# Prefix for every resource name. Change per environment.
+# Drives: <prefix>-vnet, <prefix>-db, <prefix>-plan, <prefix>-app, <prefix>-di
+name_prefix = "pm-agent"
+
+tags = {
+  application = "pm-agent"
+  environment = "dev"
+  managed_by  = "terraform"
+  cost_center = "CHANGEME"
+  owner       = "CHANGEME"
+}
+
+# ── Networking ──────────────────────────────────────────────────────────────
+# CRITICAL: these ranges must NOT overlap anything in your corporate network
+# if this VNet will ever be peered. Confirm with your network team first.
+vnet_address_space = ["10.0.0.0/16"]
+app_subnet_prefix  = ["10.0.1.0/24"]
+db_subnet_prefix   = ["10.0.2.0/24"]
+
+# ── PostgreSQL ──────────────────────────────────────────────────────────────
+postgres_admin_user            = "pgadmin"
+postgres_version               = "16"
+postgres_sku_name              = "B_Standard_B1ms" # prod: GP_Standard_D2ds_v5
+postgres_storage_mb            = 32768             # 32 GB — can grow, never shrink
+postgres_backup_retention_days = 7                 # prod: 35
+postgres_geo_redundant_backup  = false             # prod: true
+postgres_zone                  = "2"               # null if region has no zones
+postgres_database_name         = "pmAgent"         # case-sensitive, must match app
+
+# ── App Service ─────────────────────────────────────────────────────────────
+app_service_sku = "B1" # prod: P1v3. B1 is the minimum supporting VNet + Always On
+node_version    = "22-lts"
+
+# Web app name is GLOBALLY unique. Leave commented to use "<name_prefix>-app".
+# Uncomment and set if that name is already taken worldwide.
+# app_service_name_override = "pm-agent-contoso"
+
+# ── Storage ─────────────────────────────────────────────────────────────────
+# Storage name is GLOBALLY unique, 3-24 lowercase alphanumerics, no hyphens.
+# Leave commented to auto-generate "<prefix><random6>".
+# storage_account_name_override = "pmagentcontoso01"
+blob_container_name = "pm-agent-docs"
+
+# ── Document Intelligence ───────────────────────────────────────────────────
+# S0 = pay-per-page, no page cap. USE THIS.
+# F0 = free but caps EVERY request at 2 pages — real BRDs silently fall back
+#      to local text extraction, which loses tables and layout.
+document_intelligence_sku = "S0"
+
+# DI subdomain is GLOBALLY unique. Leave commented for "<name_prefix>-di".
+# di_custom_subdomain_override = "pm-agent-di-contoso"
+
+# ── Public hostname ─────────────────────────────────────────────────────────
+# Leave empty to use https://<app-name>.azurewebsites.net.
+# If set, this drives NEXTAUTH_URL — binding the domain is a separate step.
+custom_domain = ""
+
+# ── Email ───────────────────────────────────────────────────────────────────
+email_from = "noreply@yourdomain.com"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECRETS — do NOT set these here.
+#
+# Export them before running terraform:
+#
+#   export TF_VAR_anthropic_api_key='sk-ant-...'
+#   export TF_VAR_openai_api_key='sk-...'
+#   export TF_VAR_resend_api_key='re_...'
+#
+# PowerShell:
+#   $env:TF_VAR_anthropic_api_key = 'sk-ant-...'
+#
+# Left unset, Terraform GENERATES these two for you (recommended):
+#   postgres_admin_password
+#   nextauth_secret
+#
+# Retrieve generated values after apply:
+#   terraform output -raw postgres_admin_password
+#   terraform output -raw nextauth_secret
+# ═══════════════════════════════════════════════════════════════════════════
