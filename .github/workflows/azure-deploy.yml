@@ -26,7 +26,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # ── Build (runs prisma generate + DB migrations + next build) ────────────
+      # ── Build (prisma generate + next build only — migrations run at startup) ──
+      # SKIP_MIGRATIONS=1 because the GitHub Actions runner cannot reach the
+      # private PostgreSQL server (no public endpoint). Migrations run via the
+      # App Service startup command which has VNet access.
       - name: Build
         env:
           DATABASE_URL:      ${{ secrets.DATABASE_URL }}
@@ -36,6 +39,7 @@ jobs:
           RESEND_API_KEY:    ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM:        ${{ secrets.EMAIL_FROM }}
           OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
+          SKIP_MIGRATIONS:   "1"
         run: npm run build
 
       # ── Swap to production-only node_modules before packaging ───────────────
@@ -63,8 +67,4 @@ jobs:
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package:         deploy.zip
 
-      # ── Seed PMI skills into the DB (idempotent — safe on every deploy) ──────
-      - name: Seed skill templates
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: npx tsx scripts/seed-skill-templates.ts
+      # Migrations + seeding run via App Service startup command (VNet access)
