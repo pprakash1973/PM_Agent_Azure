@@ -31,7 +31,13 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const loginUrl = new URL("/login", req.url);
+  // Behind a reverse proxy (Azure App Service) req.url is the internal address
+  // (http://localhost:8080/...), so redirects built from it send the browser to
+  // localhost. Reconstruct the public origin from the forwarded headers.
+  const proto = req.headers.get("x-forwarded-proto") ?? req.nextUrl.protocol.replace(":", "");
+  const host =
+    req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? req.nextUrl.host;
+  const loginUrl = new URL("/login", `${proto}://${host}`);
   const response = NextResponse.redirect(loginUrl);
 
   // Set cookies to expired on the response object — this is the reliable way to
