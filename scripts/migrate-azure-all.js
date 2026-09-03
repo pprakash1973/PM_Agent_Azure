@@ -11,6 +11,14 @@ async function run(pool, sql, label) {
     await pool.query(sql);
     console.log(`✓ ${label}`);
   } catch (e) {
+    // `prisma db push` creates the full current schema first, so DDL here is
+    // often already applied. Treat "already exists" collisions as no-ops —
+    // notably Prisma models `@@unique` as a unique index (pg_class), which the
+    // pg_constraint guards below cannot detect, so ADD CONSTRAINT would clash.
+    if (/already exists/i.test(e.message)) {
+      console.log(`• ${label} (already present, skipped)`);
+      return;
+    }
     console.error(`✗ ${label}:`, e.message);
     throw e;
   }
