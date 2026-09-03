@@ -700,7 +700,7 @@ export default function NewProjectPage() {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Upload your BRD or SOW</CardTitle>
-                  <CardDescription>AI will extract project fields and requirements automatically. Supports all Azure Document Intelligence formats.</CardDescription>
+                  <CardDescription>AI will extract project fields and requirements automatically. PDF and DOCX are processed by Azure Document Intelligence; XLSX, TXT, MD and CSV use direct text extraction.</CardDescription>
                 </CardHeader>
                 <div className="mx-6 mb-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 flex gap-3 items-start">
                   <span className="text-amber-500 text-base mt-0.5">💡</span>
@@ -719,7 +719,11 @@ export default function NewProjectPage() {
                     >
                       <FileText className="w-10 h-10 text-[#4f5bd5] mx-auto mb-3 opacity-70" />
                       <p className="text-sm font-semibold text-slate-700">Drop your document here or click to browse</p>
-                      <p className="text-xs text-slate-400 mt-1">PDF · DOCX · XLSX · TXT · MD · CSV</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        <span className="text-[#0078d4] font-medium">PDF · DOCX</span>
+                        <span className="mx-1 text-slate-300">|</span>
+                        XLSX · TXT · MD · CSV
+                      </p>
                       <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.md" className="hidden"
                         onChange={(e) => { Array.from(e.target.files ?? []).forEach(handleFilePick); e.target.value = ""; }} />
                     </div>
