@@ -11,8 +11,17 @@ interface ExtractedRequirement {
   statement: string;
   type: "functional" | "non-functional" | "constraint" | "assumption";
   category: string;
+  priority?: "C" | "H" | "M" | "L";
   confidence: number;
   sourceQuote: string;
+}
+
+function inferPriority(req: ExtractedRequirement): string {
+  if (req.priority && ["C", "H", "M", "L"].includes(req.priority)) return req.priority;
+  // Fall back to type-based heuristic
+  if (req.type === "constraint") return "C";
+  if (req.type === "non-functional") return "H";
+  return "M";
 }
 
 export async function POST(
@@ -70,9 +79,10 @@ Rules:
 - Only extract statements clearly present in the text — never infer or fabricate
 - Each requirement must have a verbatim sourceQuote (exact text from the document proving it)
 - Assign confidence: 1.0 = verbatim, 0.8 = paraphrased but clear, 0.6 = implied
+- Assign priority using MoSCoW: C=Critical/Must-Have, H=High/Should-Have, M=Medium/Could-Have, L=Low/Won't-Have. Default M when unspecified.
 - Return JSON only
 
-Return JSON: { "requirements": [ { "requirementKey": "REQ-001", "statement": "...", "type": "functional|non-functional|constraint|assumption", "category": "scope|budget|timeline|quality|security|compliance|technical|resource|other", "confidence": 0.0-1.0, "sourceQuote": "exact verbatim text from source" } ] }`,
+Return JSON: { "requirements": [ { "requirementKey": "REQ-001", "statement": "...", "type": "functional|non-functional|constraint|assumption", "category": "scope|budget|timeline|quality|security|compliance|technical|resource|other", "priority": "C|H|M|L", "confidence": 0.0-1.0, "sourceQuote": "exact verbatim text from source" } ] }`,
     messages: [{
       role: "user",
       content: `Project: ${project.name}\n\nSource corpus:\n${corpus}\n\nExtract all requirements. Return JSON only.`,
@@ -131,6 +141,7 @@ Return JSON: { "requirements": [ { "requirementKey": "REQ-001", "statement": "..
         statement: req.statement,
         type: req.type ?? "functional",
         category: req.category ?? "other",
+        priority: inferPriority(req),
         source: "extracted",
         status: "proposed",
         confidence: req.confidence ?? 0.8,
@@ -140,6 +151,7 @@ Return JSON: { "requirements": [ { "requirementKey": "REQ-001", "statement": "..
       },
       update: {
         statement: req.statement,
+        priority: inferPriority(req),
         confidence: req.confidence ?? 0.8,
         sourceChunkId: sourceChunkId ?? undefined,
         sourceDocId: sourceDocId ?? undefined,

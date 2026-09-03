@@ -3419,6 +3419,81 @@ function ResourcesTab({ project }: { project: any }) {
   );
 }
 
+// ── Priority badge helper ─────────────────────────────────────────────────────
+
+const PRIORITY_META: Record<string, { label: string; bg: string; color: string; title: string }> = {
+  C: { label: "C", bg: "#fde8e8", color: "#b91c1c", title: "Critical" },
+  H: { label: "H", bg: "#fef3c7", color: "#92400e", title: "High" },
+  M: { label: "M", bg: "#e0f2fe", color: "#075985", title: "Medium" },
+  L: { label: "L", bg: "#f0fdf4", color: "#166534", title: "Low" },
+};
+
+function PriorityBadge({ priority, onClick }: { priority: string; onClick: () => void }) {
+  const m = PRIORITY_META[priority] ?? PRIORITY_META.M;
+  return (
+    <button
+      onClick={onClick}
+      title={`Priority: ${m.title} — click to cycle`}
+      style={{
+        width: 22, height: 22, flexShrink: 0, borderRadius: 5,
+        background: m.bg, color: m.color, border: `1px solid ${m.color}40`,
+        fontSize: 11, fontWeight: 700, cursor: "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        lineHeight: 1,
+      }}>
+      {m.label}
+    </button>
+  );
+}
+
+interface ReqRowProps {
+  req: any;
+  editingReqId: string | null;
+  editText: string;
+  setEditText: (t: string) => void;
+  reqSaving: boolean;
+  isPending?: boolean;
+  onEdit: () => void;
+  onEditSave: () => void;
+  onEditCancel: () => void;
+  onRemove: () => void;
+  onPriority: () => void;
+}
+
+function ReqRow({ req, editingReqId, editText, setEditText, reqSaving, isPending, onEdit, onEditSave, onEditCancel, onRemove, onPriority }: ReqRowProps) {
+  const isEditing = editingReqId === req.id;
+  const bg = isPending ? "#f5f7ff" : "transparent";
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", padding: "7px 11px", gap: 8, borderBottom: "1px solid #eaecf0", background: bg }}>
+      <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 500, color: "#4f5bd5", width: 52, flexShrink: 0, paddingTop: 1 }}>{req.requirementKey}</span>
+      <div style={{ paddingTop: 1 }}>
+        <PriorityBadge priority={req.priority ?? "M"} onClick={onPriority} />
+      </div>
+      {isEditing ? (
+        <div style={{ flex: 1 }}>
+          <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={2}
+            style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 5, padding: "4px 8px", fontSize: 12, resize: "vertical" as const, background: "#fff", boxSizing: "border-box" as const }} />
+          <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+            <button onClick={onEditSave} disabled={reqSaving} style={{ fontSize: 11, fontWeight: 600, background: "#22c55e", color: "#fff", border: "none", borderRadius: 5, padding: "3px 9px", cursor: "pointer" }}>Save</button>
+            <button onClick={onEditCancel} style={{ fontSize: 11, background: "#f1f5f9", color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 5, padding: "3px 9px", cursor: "pointer" }}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ flex: 1, display: "flex", flexWrap: "wrap" as const, alignItems: "flex-start", gap: 6 }}>
+          <span style={{ fontSize: 12, color: "#1e293b", lineHeight: 1.45 }}>{req.statement}</span>
+          {isPending && <span style={{ fontSize: 10, fontWeight: 600, color: "#4f5bd5", background: "#eef0fc", borderRadius: 5, padding: "1px 6px", flexShrink: 0 }}>New · pending</span>}
+        </div>
+      )}
+      {!isEditing && (
+        <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+          <button onClick={onEdit} style={{ padding: "2px 5px", border: "1px solid #e2e8f0", borderRadius: 4, fontSize: 11, color: "#64748b", background: "#fff", cursor: "pointer" }}>✎</button>
+          <button onClick={onRemove} style={{ padding: "2px 5px", border: "1px solid #e2e8f0", borderRadius: 4, fontSize: 11, color: "#ef4444", background: "#fff", cursor: "pointer" }}>✕</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Requirements tab ───────────────────────────────────────────────────────────
 
 const DOC_CLASS_OPTIONS = [
@@ -3732,6 +3807,11 @@ function ScopeControlTab({ project }: { project: any }) {
   const [newReqText, setNewReqText] = React.useState("");
   const [reqSaving, setReqSaving] = React.useState(false);
 
+  // Pagination (10 per page; reset on load)
+  const PAGE_SIZE = 10;
+  const [basedPage, setBasedPage] = React.useState(PAGE_SIZE);
+  const [pendingPage, setPendingPage] = React.useState(PAGE_SIZE);
+
   // Extraction
   const [extracting, setExtracting] = React.useState(false);
   const [extractError, setExtractError] = React.useState<string | null>(null);
@@ -3772,7 +3852,7 @@ function ScopeControlTab({ project }: { project: any }) {
     ]);
     const rData = await rRes.json().catch(() => []);
     const bData = await bRes.json().catch(() => []);
-    if (Array.isArray(rData)) setReqs(rData);
+    if (Array.isArray(rData)) { setReqs(rData); setBasedPage(PAGE_SIZE); setPendingPage(PAGE_SIZE); }
     if (Array.isArray(bData)) setBaselines(bData);
     setLoading(false);
   }
@@ -3865,6 +3945,19 @@ function ScopeControlTab({ project }: { project: any }) {
     } finally {
       setUploading(false);
       e.target.value = "";
+    }
+  }
+
+  async function handlePriorityChange(reqId: string, current: string) {
+    const cycle: Record<string, string> = { C: "H", H: "M", M: "L", L: "C" };
+    const next = cycle[current] ?? "M";
+    const res = await fetch(`/api/projects/${project.id}/requirements/${reqId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "priority", priority: next }),
+    });
+    if (res.ok) {
+      setReqs(prev => prev.map(r => r.id === reqId ? { ...r, priority: next } : r));
     }
   }
 
@@ -4487,6 +4580,7 @@ function ScopeControlTab({ project }: { project: any }) {
           {/* Table column header */}
           <div style={{ display: "flex", alignItems: "center", padding: "5px 11px", gap: 8, background: C.surface2, borderBottom: `1px solid ${C.border}` }}>
             <span style={{ fontFamily: "monospace", fontSize: 10, fontWeight: 700, color: C.text3, width: 52, flexShrink: 0, textTransform: "uppercase" as const, letterSpacing: ".04em" }}>#</span>
+            <span style={{ width: 26, flexShrink: 0, fontSize: 10, fontWeight: 700, color: C.text3, textTransform: "uppercase" as const, letterSpacing: ".04em" }}>Pri</span>
             <span style={{ flex: 1, fontSize: 10, fontWeight: 700, color: C.text3, textTransform: "uppercase" as const, letterSpacing: ".04em" }}>Requirement Statement</span>
             <span style={{ width: 52, flexShrink: 0, fontSize: 10, fontWeight: 700, color: C.text3, textTransform: "uppercase" as const, letterSpacing: ".04em" }}>Actions</span>
           </div>
@@ -4495,29 +4589,24 @@ function ScopeControlTab({ project }: { project: any }) {
             <div style={{ padding: "20px 11px", fontSize: 12, color: C.text3 }}>Loading…</div>
           ) : (
             <>
-              {/* Active baselined requirements */}
-              {basedReqs.map((req: any) => (
-                <div key={req.id} style={{ display: "flex", alignItems: "flex-start", padding: "7px 11px", gap: 8, borderBottom: `1px solid ${C.borderLight}` }}>
-                  <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 500, color: C.primary, width: 52, flexShrink: 0, paddingTop: 1 }}>{req.requirementKey}</span>
-                  {editingReqId === req.id ? (
-                    <div style={{ flex: 1 }}>
-                      <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={2} style={{ width: "100%", border: `1px solid ${C.border}`, borderRadius: 5, padding: "4px 8px", fontSize: 12, resize: "vertical" as const, background: C.surface, boxSizing: "border-box" as const }} />
-                      <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
-                        <button onClick={() => handleEditSave(req.id)} disabled={reqSaving} style={{ fontSize: 11, fontWeight: 600, background: C.green, color: "#fff", border: "none", borderRadius: 5, padding: "3px 9px", cursor: "pointer" }}>Save</button>
-                        <button onClick={() => { setEditingReqId(null); setEditText(""); }} style={{ fontSize: 11, background: C.surface2, color: C.text2, border: `1px solid ${C.border}`, borderRadius: 5, padding: "3px 9px", cursor: "pointer" }}>Cancel</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <span style={{ flex: 1, fontSize: 12, color: C.text, lineHeight: 1.45 }}>{req.statement}</span>
-                  )}
-                  {editingReqId !== req.id && (
-                    <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-                      <button onClick={() => { setEditingReqId(req.id); setEditText(req.statement); }} style={{ padding: "2px 5px", border: `1px solid ${C.border}`, borderRadius: 4, fontSize: 11, color: C.text2, background: C.surface, cursor: "pointer" }}>✎</button>
-                      <button onClick={() => handleReqAction(req.id, "remove")} style={{ padding: "2px 5px", border: `1px solid ${C.border}`, borderRadius: 4, fontSize: 11, color: C.red, background: C.surface, cursor: "pointer" }}>✕</button>
-                    </div>
-                  )}
-                </div>
+              {/* Active baselined requirements (paginated) */}
+              {basedReqs.slice(0, basedPage).map((req: any) => (
+                <ReqRow key={req.id} req={req} editingReqId={editingReqId} editText={editText} setEditText={setEditText} reqSaving={reqSaving}
+                  onEdit={() => { setEditingReqId(req.id); setEditText(req.statement); }}
+                  onEditSave={() => handleEditSave(req.id)}
+                  onEditCancel={() => { setEditingReqId(null); setEditText(""); }}
+                  onRemove={() => handleReqAction(req.id, "remove")}
+                  onPriority={() => handlePriorityChange(req.id, req.priority ?? "M")}
+                />
               ))}
+              {basedReqs.length > basedPage && (
+                <div style={{ padding: "8px 11px", borderBottom: `1px solid ${C.borderLight}` }}>
+                  <button onClick={() => setBasedPage(p => p + PAGE_SIZE)}
+                    style={{ fontSize: 11, fontWeight: 600, color: C.primary, background: C.primaryLight, border: `1px solid ${C.primaryBorder}`, borderRadius: 5, padding: "4px 12px", cursor: "pointer" }}>
+                    Load next 10 ({basedReqs.length - basedPage} remaining)
+                  </button>
+                </div>
+              )}
 
               {/* Struck-through removed requirements — live from isActive:false rows */}
               {removedReqs.map((r: any) => (
@@ -4544,32 +4633,25 @@ function ScopeControlTab({ project }: { project: any }) {
                 </div>
               )}
 
-              {/* Pending requirements */}
-              {pendingReqs.map((req: any) => (
-                <div key={req.id} style={{ display: "flex", alignItems: "flex-start", padding: "7px 11px", gap: 8, borderBottom: `1px solid ${C.borderLight}`, background: "#f5f7ff" }}>
-                  <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 500, color: C.primary, width: 52, flexShrink: 0, paddingTop: 1 }}>{req.requirementKey}</span>
-                  {editingReqId === req.id ? (
-                    <div style={{ flex: 1 }}>
-                      <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={2} style={{ width: "100%", border: `1px solid ${C.border}`, borderRadius: 5, padding: "4px 8px", fontSize: 12, resize: "vertical" as const, background: C.surface, boxSizing: "border-box" as const }} />
-                      <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
-                        <button onClick={() => handleEditSave(req.id)} disabled={reqSaving} style={{ fontSize: 11, fontWeight: 600, background: C.green, color: "#fff", border: "none", borderRadius: 5, padding: "3px 9px", cursor: "pointer" }}>Save</button>
-                        <button onClick={() => { setEditingReqId(null); setEditText(""); }} style={{ fontSize: 11, background: C.surface2, color: C.text2, border: `1px solid ${C.border}`, borderRadius: 5, padding: "3px 9px", cursor: "pointer" }}>Cancel</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ flex: 1, display: "flex", flexWrap: "wrap" as const, alignItems: "flex-start", gap: 6 }}>
-                      <span style={{ fontSize: 12, color: C.text, lineHeight: 1.45 }}>{req.statement}</span>
-                      <span style={{ fontSize: 10, fontWeight: 600, color: C.primary, background: C.primaryLight, borderRadius: 5, padding: "1px 6px", flexShrink: 0 }}>New · pending</span>
-                    </div>
-                  )}
-                  {editingReqId !== req.id && (
-                    <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-                      <button onClick={() => { setEditingReqId(req.id); setEditText(req.statement); }} style={{ padding: "2px 5px", border: `1px solid ${C.border}`, borderRadius: 4, fontSize: 11, color: C.text2, background: C.surface, cursor: "pointer" }}>✎</button>
-                      <button onClick={() => handleReqAction(req.id, "remove")} style={{ padding: "2px 5px", border: `1px solid ${C.border}`, borderRadius: 4, fontSize: 11, color: C.red, background: C.surface, cursor: "pointer" }}>✕</button>
-                    </div>
-                  )}
-                </div>
+              {/* Pending requirements (paginated) */}
+              {pendingReqs.slice(0, pendingPage).map((req: any) => (
+                <ReqRow key={req.id} req={req} editingReqId={editingReqId} editText={editText} setEditText={setEditText} reqSaving={reqSaving}
+                  isPending
+                  onEdit={() => { setEditingReqId(req.id); setEditText(req.statement); }}
+                  onEditSave={() => handleEditSave(req.id)}
+                  onEditCancel={() => { setEditingReqId(null); setEditText(""); }}
+                  onRemove={() => handleReqAction(req.id, "remove")}
+                  onPriority={() => handlePriorityChange(req.id, req.priority ?? "M")}
+                />
               ))}
+              {pendingReqs.length > pendingPage && (
+                <div style={{ padding: "8px 11px", borderBottom: `1px solid ${C.borderLight}`, background: "#f5f7ff" }}>
+                  <button onClick={() => setPendingPage(p => p + PAGE_SIZE)}
+                    style={{ fontSize: 11, fontWeight: 600, color: C.primary, background: C.primaryLight, border: `1px solid ${C.primaryBorder}`, borderRadius: 5, padding: "4px 12px", cursor: "pointer" }}>
+                    Load next 10 ({pendingReqs.length - pendingPage} remaining)
+                  </button>
+                </div>
+              )}
 
               {activeReqs.length === 0 && removedReqs.length === 0 && (
                 <div style={{ padding: "24px 16px", textAlign: "center" as const, color: C.text3, fontSize: 13 }}>

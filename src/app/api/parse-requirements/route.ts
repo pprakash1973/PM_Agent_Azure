@@ -5,6 +5,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { extractRequirements, generateProjectFromNL } from "@/lib/ai";
 import { extractPdfText } from "@/lib/pdf";
+import { uploadToBlob, generateSasUrl, uploadDiCache } from "@/lib/azure-blob";
+import { analyzeDocument } from "@/lib/azure-di";
+
+// PDF/DOCX go through Azure Document Intelligence when it's configured; other
+// formats (and a DI failure) fall back to local extraction. DI cannot parse the
+// legacy binary .doc format.
+function isAzureDiEnabled() {
+  return !!(
+    process.env.AZURE_DI_KEY &&
+    process.env.AZURE_DI_ENDPOINT &&
+    process.env.AZURE_STORAGE_CONNECTION_STRING
+  );
+}
 
 // ─── Text normalisation ───────────────────────────────────────────────────────
 
@@ -114,13 +127,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supported = ["pdf", "docx", "txt", "md"];
+    const supported = ["pdf", "docx", "txt", "md", "csv", "xls", "xlsx"];
     if (!supported.includes(ext)) {
       return NextResponse.json(
         {
           error: {
             code: "UNSUPPORTED_FORMAT",
-            message: `Unsupported file type .${ext}. Supported formats: PDF, DOCX, TXT.`,
+            message: `Unsupported file type .${ext}. Supported formats: PDF, DOCX, XLSX, TXT, MD.`,
           },
         },
         { status: 400 }
@@ -129,19 +142,65 @@ export async function POST(req: NextRequest) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     let text = "";
+    // Ingestion provenance carried through to project creation so the stored
+    // document + chunks record which engine produced them.
+    let engine: "azure-di" | "text" | "text-fallback" = "text";
+    let storageUri: string | null = null;
+    let ocrApplied = false;
+    let extractionConfidence: number | null = 0.85;
 
-    if (ext === "pdf") {
-      text = await extractPdfText(buffer);
-    } else if (ext === "docx") {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const mammoth = require("mammoth");
-      const result = await mammoth.extractRawText({ buffer });
-      if (result.messages?.some((m: any) => m.type === "error")) {
-        console.warn("mammoth warnings:", result.messages);
+    const diEligible = ext === "pdf" || ext === "docx";
+
+    if (diEligible && isAzureDiEnabled()) {
+      // ── Azure Document Intelligence path (layout-aware) ─────────────────────
+      // Runs DI once here and caches the result blob so project creation can
+      // build chunks from it without a second DI call.
+      try {
+        const orgId = (session.user as any).orgId ?? "org";
+        const stagingId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const blobUrl = await uploadToBlob(orgId, "_staging", stagingId, buffer, file.name);
+        const sasUrl = await generateSasUrl(blobUrl, 20);
+        const resultJson = await analyzeDocument(sasUrl);
+        await uploadDiCache(blobUrl, resultJson);
+        const diResult = JSON.parse(resultJson);
+        text = diResult.content ?? "";
+        engine = "azure-di";
+        storageUri = blobUrl;
+        ocrApplied = true;
+        extractionConfidence = 0.92;
+      } catch (diErr: any) {
+        console.warn("[parse-requirements] Azure DI failed, falling back to local extraction:", diErr?.message);
+        engine = "text-fallback";
+        extractionConfidence = 0.85;
+        text = "";
       }
-      text = result.value;
-    } else {
-      text = buffer.toString("utf-8");
+    }
+
+    if (engine !== "azure-di") {
+      // ── Local extraction (non-DI formats, or DI fallback) ───────────────────
+      if (ext === "pdf") {
+        text = await extractPdfText(buffer);
+      } else if (ext === "docx") {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const mammoth = require("mammoth");
+        const result = await mammoth.extractRawText({ buffer });
+        if (result.messages?.some((m: any) => m.type === "error")) {
+          console.warn("mammoth warnings:", result.messages);
+        }
+        text = result.value;
+      } else if (ext === "xls" || ext === "xlsx") {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const XLSX = require("xlsx");
+        const wb = XLSX.read(buffer, { type: "buffer" });
+        const lines: string[] = [];
+        for (const sheetName of wb.SheetNames) {
+          lines.push(`=== ${sheetName} ===`);
+          lines.push(XLSX.utils.sheet_to_csv(wb.Sheets[sheetName]));
+        }
+        text = lines.join("\n");
+      } else {
+        text = buffer.toString("utf-8");
+      }
     }
 
     if (!text.trim()) {
@@ -192,6 +251,12 @@ export async function POST(req: NextRequest) {
       extractedText: truncated,
       requirements,
       projectFields,
+      // Ingestion provenance — project creation persists the stored document
+      // and its chunks from this (DI result reused from the cache blob).
+      engine,
+      storageUri,
+      ocrApplied,
+      extractionConfidence,
     });
   } catch (err: any) {
     console.error("parse-requirements error:", err);

@@ -429,6 +429,7 @@ model Requirement {
   sourceChunkId     String?
   sourceDocId       String?
   sourceQuote       String?
+  priority          String    @default("M")
   confirmedById     String?
   confirmedAt       DateTime?
   amendedStatement  String?

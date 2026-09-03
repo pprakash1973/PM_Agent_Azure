@@ -1120,6 +1120,14 @@ async function main() {
       CREATE INDEX IF NOT EXISTS "budget_revisions_projectId_idx" ON budget_revisions("projectId")
     `, "budget_revisions table");
 
+    // ── Requirement.priority column ──────────────────────────────────────────────
+    await run(pool, `
+      ALTER TABLE "Requirement"
+        ADD COLUMN IF NOT EXISTS "priority"      TEXT NOT NULL DEFAULT 'M',
+        ADD COLUMN IF NOT EXISTS "sourceDocId"   TEXT,
+        ADD COLUMN IF NOT EXISTS "isActive"      BOOLEAN NOT NULL DEFAULT true
+    `, "Requirement priority + sourceDocId + isActive columns");
+
     console.log("✓ All migrations complete");
 
   } catch (err) {

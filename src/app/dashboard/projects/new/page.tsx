@@ -27,6 +27,10 @@ interface UploadedDoc {
     requirementsExtracted: Record<string, unknown>;
     sowAssumptions: string[];
     sowDependencies: { description: string; type: string; owner?: string }[];
+    engine?: "azure-di" | "text" | "text-fallback";
+    storageUri?: string | null;
+    ocrApplied?: boolean;
+    extractionConfidence?: number | null;
   };
 }
 
@@ -93,8 +97,8 @@ function ProcessingOverlay({ filename }: { filename: string }) {
       style={{ background: "rgba(15,23,42,0.75)", backdropFilter: "blur(6px)" }}>
       <style>{`
         @keyframes doc-breathe {
-          0%,100% { transform: scale(1); filter: drop-shadow(0 0 0px #4f5bd5); }
-          50% { transform: scale(1.06); filter: drop-shadow(0 0 12px #4f5bd580); }
+          0%,100% { transform: scale(1); filter: drop-shadow(0 0 0px #0078d4); }
+          50% { transform: scale(1.06); filter: drop-shadow(0 0 12px #0078d480); }
         }
         @keyframes chunk-scatter {
           0%   { transform: translate(0,0) scale(0.15) rotate(0deg); opacity: 0; }
@@ -126,7 +130,7 @@ function ProcessingOverlay({ filename }: { filename: string }) {
               animation: `chunk-scatter 2.2s ease-out ${c.delay}s infinite`,
             } as React.CSSProperties}>
               <svg width="26" height="22" viewBox="0 0 26 22" fill="none">
-                <rect x="1" y="1" width="24" height="20" rx="3" fill="#4f5bd5" opacity="0.85"/>
+                <rect x="1" y="1" width="24" height="20" rx="3" fill="#0078d4" opacity="0.85"/>
                 <rect x="4" y="5"  width="14" height="2.5" rx="1.2" fill="white" opacity="0.65"/>
                 <rect x="4" y="10" width="10" height="2.5" rx="1.2" fill="white" opacity="0.45"/>
                 <rect x="4" y="15" width="7"  height="2"   rx="1"   fill="white" opacity="0.3"/>
@@ -134,19 +138,28 @@ function ProcessingOverlay({ filename }: { filename: string }) {
             </div>
           ))}
 
-          {/* main document */}
+          {/* main document with Azure scan lines */}
           <div style={{ animation: "doc-breathe 2s ease-in-out infinite", zIndex: 10 }}>
             <svg width="72" height="90" viewBox="0 0 72 90" fill="none">
-              <rect x="2" y="2" width="68" height="86" rx="8" fill="#EEF0FC" stroke="#4f5bd5" strokeWidth="2.5"/>
+              <rect x="2" y="2" width="68" height="86" rx="8" fill="#E8F4FD" stroke="#0078d4" strokeWidth="2.5"/>
               {/* dog-ear fold */}
-              <path d="M52 2 L70 20 L52 20 Z" fill="#cfd4f5"/>
-              <rect x="12" y="28" width="48" height="5" rx="2.5" fill="#4f5bd5" opacity="0.5"/>
-              <rect x="12" y="38" width="40" height="5" rx="2.5" fill="#4f5bd5" opacity="0.38"/>
-              <rect x="12" y="48" width="44" height="5" rx="2.5" fill="#4f5bd5" opacity="0.28"/>
-              <rect x="12" y="58" width="30" height="5" rx="2.5" fill="#4f5bd5" opacity="0.18"/>
-              <rect x="12" y="68" width="36" height="5" rx="2.5" fill="#4f5bd5" opacity="0.12"/>
+              <path d="M52 2 L70 20 L52 20 Z" fill="#b3d9f5"/>
+              <rect x="12" y="28" width="48" height="5" rx="2.5" fill="#0078d4" opacity="0.5"/>
+              <rect x="12" y="38" width="40" height="5" rx="2.5" fill="#0078d4" opacity="0.38"/>
+              <rect x="12" y="48" width="44" height="5" rx="2.5" fill="#0078d4" opacity="0.28"/>
+              <rect x="12" y="58" width="30" height="5" rx="2.5" fill="#0078d4" opacity="0.18"/>
+              <rect x="12" y="68" width="36" height="5" rx="2.5" fill="#0078d4" opacity="0.12"/>
             </svg>
           </div>
+        </div>
+
+        {/* Azure DI badge */}
+        <div className="flex items-center justify-center gap-2 mb-3">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-label="Azure">
+            <path d="M9 0L17.66 15.75H0.34L9 0Z" fill="#0078d4"/>
+            <path d="M9 4.5L14.66 14.25H3.34L9 4.5Z" fill="#50b0f0" opacity="0.6"/>
+          </svg>
+          <span className="text-xs font-semibold text-[#0078d4] tracking-wide">Document Intelligence is working</span>
         </div>
 
         <p className="text-sm font-semibold text-slate-800 mb-1"
@@ -157,7 +170,7 @@ function ProcessingOverlay({ filename }: { filename: string }) {
 
         {/* progress bar */}
         <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-          <div className="h-full bg-gradient-to-r from-[#4f5bd5] to-[#7c3aed] rounded-full"
+          <div className="h-full bg-gradient-to-r from-[#0078d4] to-[#50b0f0] rounded-full"
             style={{ animation: "progress-crawl 60s linear forwards" }} />
         </div>
         <p className="text-xs text-slate-300 mt-2">This may take up to a minute for large documents</p>
@@ -371,6 +384,8 @@ export default function NewProjectPage() {
             requirementsText: data.extractedText, requirementsFileName: data.fileName,
             requirementsFileFormat: data.fileFormat, requirementsExtracted: req,
             sowAssumptions, sowDependencies,
+            engine: data.engine, storageUri: data.storageUri,
+            ocrApplied: data.ocrApplied, extractionConfidence: data.extractionConfidence,
           } } : d
         )
       );
@@ -417,6 +432,17 @@ export default function NewProjectPage() {
       };
       const doneDocs = docs.filter((d) => d.status === "done" && d.parsed);
       if (doneDocs.length > 0) {
+        // New: per-document provenance lets the API route use the DI cache for chunks
+        payload.requirementsDocs = doneDocs.map((d) => ({
+          fileName: d.parsed!.requirementsFileName,
+          fileFormat: d.parsed!.requirementsFileFormat,
+          engine: d.parsed!.engine ?? "text",
+          storageUri: d.parsed!.storageUri ?? null,
+          text: d.parsed!.requirementsText,
+          ocrApplied: d.parsed!.ocrApplied ?? false,
+          extractionConfidence: d.parsed!.extractionConfidence ?? null,
+        }));
+        // Legacy fields kept for backward compatibility + scope requirement seeding
         payload.requirementsText = doneDocs.map((d) => d.parsed!.requirementsText).join("\n\n---\n\n");
         payload.requirementsFileName = doneDocs.map((d) => d.parsed!.requirementsFileName).join(", ");
         payload.requirementsFileFormat = doneDocs[0].parsed!.requirementsFileFormat;
@@ -674,7 +700,7 @@ export default function NewProjectPage() {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Upload your BRD or SOW</CardTitle>
-                  <CardDescription>AI will extract project fields and requirements automatically. Supports PDF, Word, and text files.</CardDescription>
+                  <CardDescription>AI will extract project fields and requirements automatically. Supports all Azure Document Intelligence formats.</CardDescription>
                 </CardHeader>
                 <div className="mx-6 mb-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 flex gap-3 items-start">
                   <span className="text-amber-500 text-base mt-0.5">💡</span>
@@ -693,7 +719,7 @@ export default function NewProjectPage() {
                     >
                       <FileText className="w-10 h-10 text-[#4f5bd5] mx-auto mb-3 opacity-70" />
                       <p className="text-sm font-semibold text-slate-700">Drop your document here or click to browse</p>
-                      <p className="text-xs text-slate-400 mt-1">PDF · DOCX · XLSX · TXT · MD</p>
+                      <p className="text-xs text-slate-400 mt-1">PDF · DOCX · XLSX · TXT · MD · CSV</p>
                       <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.md" className="hidden"
                         onChange={(e) => { Array.from(e.target.files ?? []).forEach(handleFilePick); e.target.value = ""; }} />
                     </div>

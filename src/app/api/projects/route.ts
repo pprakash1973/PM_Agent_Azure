@@ -5,7 +5,71 @@ import { prisma } from "@/lib/db";
 import { generateProjectFromNL } from "@/lib/ai";
 import { syncProjectDeliveryOwners } from "@/lib/delivery-owners";
 import { DEFAULT_DETAILED_ARTIFACTS, DEFAULT_HIGH_LEVEL_ARTIFACTS } from "@/lib/utils";
+import { downloadDiCache } from "@/lib/azure-blob";
+import { diResultToChunks } from "@/lib/azure-di";
+import { chunkText } from "@/lib/chunking";
 import { z } from "zod";
+
+// One requirements document uploaded through the creation wizard, already
+// extracted by /api/parse-requirements (Azure DI for PDF/DOCX, else local).
+interface WizardReqDoc {
+  fileName: string;
+  fileFormat: string;
+  engine?: "azure-di" | "text" | "text-fallback";
+  storageUri?: string | null;
+  text?: string;
+  ocrApplied?: boolean;
+  extractionConfidence?: number | null;
+}
+
+/**
+ * Persist a wizard-uploaded requirements document and its DocumentChunk index.
+ * DI-parsed docs rebuild chunks from the cached DI result (no second DI call);
+ * locally-extracted docs are chunked from their text. Chunking failures are
+ * non-fatal — the document is still stored so the upload isn't lost.
+ */
+async function persistWizardDoc(
+  db: any,
+  projectId: string,
+  uploadedById: string,
+  d: WizardReqDoc,
+): Promise<void> {
+  const engine = d.engine ?? "text";
+  let chunks: Array<{ chunkIndex: number; pageNumber: number; charStart: number; charEnd: number; sectionTitle: string | null; text: string; tokenCount: number }> = [];
+
+  if (engine === "azure-di" && d.storageUri) {
+    const cached = await downloadDiCache(d.storageUri).catch(() => null);
+    if (cached) {
+      try { chunks = diResultToChunks(cached); } catch { chunks = []; }
+    }
+  }
+  if (chunks.length === 0 && d.text) {
+    chunks = chunkText(d.text);
+  }
+
+  const doc = await db.requirementsDocument.create({
+    data: {
+      projectId,
+      fileName: d.fileName,
+      fileFormat: d.fileFormat || "txt",
+      storageUri: d.storageUri ?? `inline:${projectId}:${Date.now()}`,
+      extractedContent: (d.text ? { rawText: d.text.slice(0, 200000) } : {}) as object,
+      extractionConfidence: d.extractionConfidence ?? (engine === "azure-di" ? 0.92 : 0.85),
+      ocrApplied: d.ocrApplied ?? engine === "azure-di",
+      pmConfirmed: true,
+      uploadedById,
+      ingestionState: "ready",
+      chunkCount: chunks.length,
+    },
+  });
+
+  if (chunks.length > 0) {
+    await db.documentChunk.createMany({
+      data: chunks.map((c) => ({ id: `${doc.id}-${c.chunkIndex}`, documentId: doc.id, projectId, ...c })),
+      skipDuplicates: true,
+    });
+  }
+}
 
 const createSchema = z.object({
   name: z.string().min(1).optional(),
@@ -38,6 +102,16 @@ const createSchema = z.object({
   requirementsFileName: z.string().optional(),
   requirementsFileFormat: z.string().optional(),
   requirementsExtracted: z.record(z.string(), z.unknown()).optional(),
+  // Per-document provenance from /api/parse-requirements (DI engine, blob URL, etc.)
+  requirementsDocs: z.array(z.object({
+    fileName: z.string(),
+    fileFormat: z.string(),
+    engine: z.enum(["azure-di", "text", "text-fallback"]).optional(),
+    storageUri: z.string().nullable().optional(),
+    text: z.string().optional(),
+    ocrApplied: z.boolean().optional(),
+    extractionConfidence: z.number().nullable().optional(),
+  })).optional(),
   // SOW-extracted registers (seeded at creation time)
   sowAssumptions: z.array(z.string()).optional(),
   sowDependencies: z.array(z.object({
@@ -223,18 +297,22 @@ export async function POST(req: NextRequest) {
       })),
     });
 
-    // Save requirements document if file was uploaded
-    if (data.requirementsText && data.requirementsFileName) {
-      await db.requirementsDocument.create({
-        data: {
-          projectId: project.id,
-          fileName: data.requirementsFileName,
-          fileFormat: data.requirementsFileFormat || "txt",
-          storageUri: `inline:${project.id}`,
-          extractedContent: (data.requirementsExtracted ?? { rawText: data.requirementsText }) as object,
-          pmConfirmed: true,
-          uploadedById: user.id,
-        },
+    // Save requirements documents + chunk index from wizard upload.
+    // New path: requirementsDocs carries DI provenance (one entry per file).
+    // Legacy path: single requirementsText/requirementsFileName (no DI, inline storage).
+    if (data.requirementsDocs && data.requirementsDocs.length > 0) {
+      for (const doc of data.requirementsDocs) {
+        await persistWizardDoc(db, project.id, user.id, doc);
+      }
+    } else if (data.requirementsText && data.requirementsFileName) {
+      await persistWizardDoc(db, project.id, user.id, {
+        fileName: data.requirementsFileName,
+        fileFormat: data.requirementsFileFormat || "txt",
+        engine: "text",
+        storageUri: null,
+        text: data.requirementsText,
+        ocrApplied: false,
+        extractionConfidence: 0.85,
       });
     }
 
@@ -265,12 +343,21 @@ export async function POST(req: NextRequest) {
     // Seed scope requirements extracted from SOW into the Requirement table
     const scopeItems = (data.requirementsExtracted as any)?.scopeItems;
     if (Array.isArray(scopeItems) && scopeItems.length > 0) {
+      function sowPriority(stmt: string): string {
+        const s = stmt.toLowerCase();
+        if (/\bmust\s+have\b|\bcritical\b/.test(s)) return "C";
+        if (/\bshould\s+have\b|\bhigh\b/.test(s)) return "H";
+        if (/\bwon.?t\s+have\b|\blow\b/.test(s)) return "L";
+        if (/\bcould\s+have\b|\bmedium\b/.test(s)) return "M";
+        return "M";
+      }
       await db.requirement.createMany({
         data: scopeItems.map((item: string, i: number) => ({
           projectId: project.id,
           requirementKey: `REQ-${String(i + 1).padStart(3, "0")}`,
           statement: String(item),
           type: "functional",
+          priority: sowPriority(String(item)),
           source: "sow_extract",
           status: "proposed",
         })),

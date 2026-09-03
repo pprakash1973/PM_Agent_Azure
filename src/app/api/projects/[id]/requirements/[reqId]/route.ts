@@ -13,7 +13,7 @@ export async function PATCH(
   if (access.error) return access.error;
 
   const body = await req.json();
-  const { action, statement } = body;
+  const { action, statement, priority } = body;
 
   const existing = await prisma.requirement.findFirst({ where: { id: reqId, projectId: id } });
   if (!existing) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
@@ -27,8 +27,12 @@ export async function PATCH(
   } else if (action === "edit") {
     if (!statement?.trim()) return NextResponse.json({ error: "statement required" }, { status: 400 });
     data = { statement: statement.trim() };
+  } else if (action === "priority") {
+    const valid = ["C", "H", "M", "L"];
+    if (!valid.includes(priority)) return NextResponse.json({ error: "priority must be C|H|M|L" }, { status: 400 });
+    data = { priority };
   } else {
-    return NextResponse.json({ error: "action must be remove|restore|edit" }, { status: 400 });
+    return NextResponse.json({ error: "action must be remove|restore|edit|priority" }, { status: 400 });
   }
 
   const updated = await prisma.requirement.update({ where: { id: reqId }, data });

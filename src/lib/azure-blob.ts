@@ -41,6 +41,39 @@ export async function uploadToBlob(
   return blockBlobClient.url;
 }
 
+// ── Document Intelligence result cache ──────────────────────────────────────
+// parse-requirements runs DI once and stashes the result JSON as a sibling blob
+// (`<blob>.di.json`) so project creation can build chunks from it without a
+// second (expensive, slow) DI call.
+
+function diCacheBlobName(blobUrl: string): { container: string; name: string } {
+  const url = new URL(blobUrl);
+  const [, container, ...blobParts] = url.pathname.split("/");
+  return { container, name: `${blobParts.join("/")}.di.json` };
+}
+
+export async function uploadDiCache(blobUrl: string, resultJson: string): Promise<void> {
+  const { container, name } = diCacheBlobName(blobUrl);
+  const containerClient = getClient().getContainerClient(container);
+  const blockBlobClient = containerClient.getBlockBlobClient(name);
+  const buffer = Buffer.from(resultJson, "utf-8");
+  await blockBlobClient.uploadData(buffer, {
+    blobHTTPHeaders: { blobContentType: "application/json" },
+  });
+}
+
+export async function downloadDiCache(blobUrl: string): Promise<string | null> {
+  try {
+    const { container, name } = diCacheBlobName(blobUrl);
+    const containerClient = getClient().getContainerClient(container);
+    const blockBlobClient = containerClient.getBlockBlobClient(name);
+    const buffer = await blockBlobClient.downloadToBuffer();
+    return buffer.toString("utf-8");
+  } catch {
+    return null;
+  }
+}
+
 export async function generateSasUrl(blobUrl: string, expiryMinutes = 60): Promise<string> {
   const connStr = getConnStr();
   const accountName = connStr.match(/AccountName=([^;]+)/)?.[1];
